@@ -30,12 +30,18 @@ async function checkRegistration() {
   // Current banner shown while registrations are closed
   const registrationClosed = bodyText.includes("registration will open soon");
 
-  // Look for possible registration links/buttons
+  // Look for possible registration links/buttons for THIS event.
   const registrationLinkExists = $("a")
     .toArray()
     .some((el) => {
       const href = ($(el).attr("href") || "").toLowerCase();
       const text = $(el).text().trim().toLowerCase();
+
+      // Ignore links to other cities' events (e.g. a "Register Now!" for
+      // hyrox-mumbai on the Bengaluru page) — those aren't our registration.
+      if (href.includes("/event/hyrox-") && !href.includes("bengaluru")) {
+        return false;
+      }
 
       return (
         href.includes("register") ||
