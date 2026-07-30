@@ -106,7 +106,16 @@ ${URL}`,
 
     console.log("Registration notification sent.");
   } else {
-    console.log("Registration not open.");
+    await sendTelegram(
+      `🔴 HYROX Bengaluru: registration still NOT open
+
+Checked at:
+${now.toISOString()}
+
+${URL}`,
+    );
+
+    console.log("Registration not open — status sent.");
   }
 }
 
