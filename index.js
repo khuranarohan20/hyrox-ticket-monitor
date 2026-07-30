@@ -14,14 +14,29 @@ async function sendTelegram(message) {
   });
 }
 
+// The site is slow/flaky from GitHub's runners, so give it a generous timeout
+// and retry a few times before treating it as a real error.
+async function fetchPage(attempts = 3) {
+  for (let i = 1; i <= attempts; i++) {
+    try {
+      const { data } = await axios.get(URL, {
+        headers: {
+          "User-Agent":
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+        },
+        timeout: 30000,
+      });
+      return data;
+    } catch (err) {
+      if (i === attempts) throw err;
+      console.log(`Fetch attempt ${i} failed (${err.message}), retrying...`);
+      await new Promise((r) => setTimeout(r, 3000));
+    }
+  }
+}
+
 async function checkRegistration() {
-  const { data } = await axios.get(URL, {
-    headers: {
-      "User-Agent":
-        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
-    },
-    timeout: 15000,
-  });
+  const data = await fetchPage();
 
   const $ = cheerio.load(data);
 
