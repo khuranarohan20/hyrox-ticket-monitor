@@ -40,11 +40,6 @@ async function checkRegistration() {
 
   const $ = cheerio.load(data);
 
-  const bodyText = $("body").text().replace(/\s+/g, " ").trim().toLowerCase();
-
-  // Current banner shown while registrations are closed
-  const registrationClosed = bodyText.includes("registration will open soon");
-
   // Look for possible registration links/buttons for THIS event.
   const registrationLinkExists = $("a")
     .toArray()
@@ -71,7 +66,10 @@ async function checkRegistration() {
       );
     });
 
-  const registrationOpen = registrationLinkExists || !registrationClosed;
+  // Only treat registration as open when a real Bengaluru registration/ticket
+  // link is present — a missing "open soon" banner alone isn't enough (the site
+  // could just restyle it).
+  const registrationOpen = registrationLinkExists;
 
   // GitHub Actions cron is UTC.
   // 23:30 UTC = 05:00 IST
