@@ -2,11 +2,9 @@ name: HYROX Monitor
 
 on:
   schedule:
-    - cron: "*/5 * * * *"
+    - cron: "*/30 * * * *"
+    - cron: "30 23 * * *"
   workflow_dispatch:
-
-permissions:
-  contents: write
 
 jobs:
   monitor:
@@ -19,17 +17,9 @@ jobs:
         with:
           node-version: 22
 
-      - run: npm install
+      - run: npm ci
 
       - run: node index.js
         env:
           BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
           CHAT_ID: ${{ secrets.CHAT_ID }}
-
-      - name: Commit state
-        run: |
-          git config user.name github-actions
-          git config user.email github-actions@github.com
-          git add state.json
-          git diff --cached --quiet || git commit -m "Update monitor state"
-          git push
