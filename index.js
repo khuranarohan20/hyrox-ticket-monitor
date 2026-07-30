@@ -14,28 +14,44 @@ async function sendTelegram(message) {
   });
 }
 
+// The site is slow/flaky from GitHub's runners, so give it a generous timeout
+// and retry a few times before treating it as a real error.
+async function fetchPage(attempts = 3) {
+  for (let i = 1; i <= attempts; i++) {
+    try {
+      const { data } = await axios.get(URL, {
+        headers: {
+          "User-Agent":
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+        },
+        timeout: 30000,
+      });
+      return data;
+    } catch (err) {
+      if (i === attempts) throw err;
+      console.log(`Fetch attempt ${i} failed (${err.message}), retrying...`);
+      await new Promise((r) => setTimeout(r, 3000));
+    }
+  }
+}
+
 async function checkRegistration() {
-  const { data } = await axios.get(URL, {
-    headers: {
-      "User-Agent":
-        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
-    },
-    timeout: 15000,
-  });
+  const data = await fetchPage();
 
   const $ = cheerio.load(data);
 
-  const bodyText = $("body").text().replace(/\s+/g, " ").trim().toLowerCase();
-
-  // Current banner shown while registrations are closed
-  const registrationClosed = bodyText.includes("registration will open soon");
-
-  // Look for possible registration links/buttons
+  // Look for possible registration links/buttons for THIS event.
   const registrationLinkExists = $("a")
     .toArray()
     .some((el) => {
       const href = ($(el).attr("href") || "").toLowerCase();
       const text = $(el).text().trim().toLowerCase();
+
+      // Ignore links to other cities' events (e.g. a "Register Now!" for
+      // hyrox-mumbai on the Bengaluru page) — those aren't our registration.
+      if (href.includes("/event/hyrox-") && !href.includes("bengaluru")) {
+        return false;
+      }
 
       return (
         href.includes("register") ||
@@ -50,14 +66,21 @@ async function checkRegistration() {
       );
     });
 
-  const registrationOpen = registrationLinkExists || !registrationClosed;
+  // Only treat registration as open when a real Bengaluru registration/ticket
+  // link is present — a missing "open soon" banner alone isn't enough (the site
+  // could just restyle it).
+  const registrationOpen = registrationLinkExists;
 
   // GitHub Actions cron is UTC.
   // 23:30 UTC = 05:00 IST
   const now = new Date();
   const isDailyStatus = now.getUTCHours() === 23 && now.getUTCMinutes() === 30;
 
-  if (isDailyStatus) {
+  // Set when the job is triggered manually (workflow_dispatch) so a manual run
+  // always sends a status message for testing.
+  const forceNotify = process.env.FORCE_NOTIFY === "true";
+
+  if (isDailyStatus || forceNotify) {
     await sendTelegram(
       `☀️ HYROX Bengaluru Daily Status
 
