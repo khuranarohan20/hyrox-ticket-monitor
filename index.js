@@ -57,7 +57,11 @@ async function checkRegistration() {
   const now = new Date();
   const isDailyStatus = now.getUTCHours() === 23 && now.getUTCMinutes() === 30;
 
-  if (isDailyStatus) {
+  // Set when the job is triggered manually (workflow_dispatch) so a manual run
+  // always sends a status message for testing.
+  const forceNotify = process.env.FORCE_NOTIFY === "true";
+
+  if (isDailyStatus || forceNotify) {
     await sendTelegram(
       `☀️ HYROX Bengaluru Daily Status
 
