@@ -1,8 +1,10 @@
 name: HYROX Monitor
 
+# Driven by cron-job.org via repository_dispatch (GitHub's own cron is
+# unreliable/delayed). schedule is kept only as a best-effort fallback.
 on:
+  repository_dispatch:
   schedule:
-    - cron: "*/30 * * * *"
     - cron: "30 23 * * *"
   workflow_dispatch:
 
