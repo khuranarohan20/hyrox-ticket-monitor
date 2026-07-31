@@ -86,69 +86,54 @@ function isRegistrationOpen(html, slug) {
 }
 
 async function checkEvent(event) {
-  const html = await fetchPage(event.url);
-  const registrationOpen = isRegistrationOpen(html, event.slug);
-
-  // GitHub Actions cron is UTC.
-  // 23:30 UTC = 05:00 IST
-  const now = new Date();
-  const isDailyStatus = now.getUTCHours() === 23 && now.getUTCMinutes() === 30;
-
-  // Set when the job is triggered manually (workflow_dispatch) so a manual run
-  // always sends a status message for testing.
-  const forceNotify = process.env.FORCE_NOTIFY === "true";
-
-  if (isDailyStatus || forceNotify) {
-    await sendTelegram(
-      `☀️ ${event.name} Daily Status
-
-${registrationOpen ? "🟢 Registration: OPEN" : "🔴 Registration: NOT OPEN"}
-
-Checked at:
-${now.toISOString()}
-
-${event.url}`,
-    );
-
-    console.log(`${event.name}: daily status sent.`);
-    return;
-  }
-
-  if (registrationOpen) {
-    await sendTelegram(
-      `🚨 ${event.name} Registration appears to be LIVE!
-
-Check immediately:
-${event.url}`,
-    );
-
-    console.log(`${event.name}: registration notification sent.`);
-  } else {
-    await sendTelegram(
-      `🔴 ${event.name}: registration still NOT open
-
-Checked at:
-${now.toISOString()}
-
-${event.url}`,
-    );
-
-    console.log(`${event.name}: not open — status sent.`);
+  // Check each event independently so one failing page doesn't sink the rest.
+  try {
+    const html = await fetchPage(event.url);
+    return { event, open: isRegistrationOpen(html, event.slug), error: null };
+  } catch (err) {
+    console.error(`${event.name} check failed:`, err);
+    return { event, open: false, error: err.message };
   }
 }
 
 async function main() {
-  // Check each event independently so one failing page doesn't block the other.
+  const results = [];
   for (const event of EVENTS) {
-    try {
-      await checkEvent(event);
-    } catch (err) {
-      console.error(`${event.name} check failed:`, err);
-      try {
-        await sendTelegram(`❌ ${event.name} Monitor Error\n\n${err.message}`);
-      } catch (_) {}
-    }
+    results.push(await checkEvent(event));
   }
+
+  const anyOpen = results.some((r) => r.open);
+
+  // GitHub Actions cron is UTC. 23:30 UTC = 05:00 IST
+  const now = new Date();
+  const isDailyStatus = now.getUTCHours() === 23 && now.getUTCMinutes() === 30;
+  // Set on manual (workflow_dispatch) runs so a manual run always reports.
+  const forceNotify = process.env.FORCE_NOTIFY === "true";
+
+  const lines = results.map((r) => {
+    if (r.error) return `⚠️ ${r.event.name}: check failed (${r.error})`;
+    return r.open
+      ? `🟢 ${r.event.name}: OPEN — ${r.event.url}`
+      : `🔴 ${r.event.name}: not open`;
+  });
+
+  const header =
+    isDailyStatus || forceNotify
+      ? "☀️ HYROX Registration — Daily Status"
+      : anyOpen
+        ? "🚨 HYROX Registration is LIVE!"
+        : "🔴 HYROX Registration Watch";
+
+  await sendTelegram(
+    `${header}
+
+${lines.join("\n")}
+
+Checked at:
+${now.toISOString()}`,
+  );
+
+  console.log(anyOpen ? "Alert sent." : "Status sent.");
 }
 
-main();
+main().catch((err) => console.error("Monitor failed:", err));
