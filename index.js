@@ -4,7 +4,20 @@ const cheerio = require("cheerio");
 const BOT_TOKEN = process.env.BOT_TOKEN;
 const CHAT_ID = process.env.CHAT_ID;
 
-const URL = "https://hyrox.co.in/event/hyrox-bengaluru/";
+// Events to monitor. `slug` is the city token used to ignore other cities'
+// event links that show up on the page.
+const EVENTS = [
+  {
+    name: "HYROX Bengaluru",
+    url: "https://hyrox.co.in/event/hyrox-bengaluru/",
+    slug: "bengaluru",
+  },
+  {
+    name: "HYROX Hong Kong",
+    url: "https://hyrox.com/event/hyrox-hong-kong/",
+    slug: "hong-kong",
+  },
+];
 
 async function sendTelegram(message) {
   await axios.post(`https://api.telegram.org/bot${BOT_TOKEN}/sendMessage`, {
@@ -14,12 +27,12 @@ async function sendTelegram(message) {
   });
 }
 
-// The site is slow/flaky from GitHub's runners, so give it a generous timeout
-// and retry a few times before treating it as a real error.
-async function fetchPage(attempts = 3) {
+// The sites are slow/flaky from GitHub's runners, so give them a generous
+// timeout and retry a few times before treating it as a real error.
+async function fetchPage(url, attempts = 3) {
   for (let i = 1; i <= attempts; i++) {
     try {
-      const { data } = await axios.get(URL, {
+      const { data } = await axios.get(url, {
         headers: {
           "User-Agent":
             "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
@@ -35,21 +48,26 @@ async function fetchPage(attempts = 3) {
   }
 }
 
-async function checkRegistration() {
-  const data = await fetchPage();
+// Heuristic: registration is open when a real registration/ticket link for THIS
+// event is present. Site-structure-dependent — the thing to revisit when tuning.
+function isRegistrationOpen(html, slug) {
+  const $ = cheerio.load(html);
 
-  const $ = cheerio.load(data);
-
-  // Look for possible registration links/buttons for THIS event.
-  const registrationLinkExists = $("a")
+  return $("a")
     .toArray()
     .some((el) => {
       const href = ($(el).attr("href") || "").toLowerCase();
       const text = $(el).text().trim().toLowerCase();
 
+      // Ignore unrelated promo links (e.g. "Race for Impact" charity tickets on
+      // hyrox.com) — they contain "ticket" but aren't event registration.
+      if (href.includes("charity") || href.includes("race-for-impact")) {
+        return false;
+      }
+
       // Ignore links to other cities' events (e.g. a "Register Now!" for
-      // hyrox-mumbai on the Bengaluru page) — those aren't our registration.
-      if (href.includes("/event/hyrox-") && !href.includes("bengaluru")) {
+      // hyrox-mumbai on this page) — those aren't our registration.
+      if (href.includes("/event/hyrox-") && !href.includes(slug)) {
         return false;
       }
 
@@ -65,11 +83,11 @@ async function checkRegistration() {
         text.includes("book now")
       );
     });
+}
 
-  // Only treat registration as open when a real Bengaluru registration/ticket
-  // link is present — a missing "open soon" banner alone isn't enough (the site
-  // could just restyle it).
-  const registrationOpen = registrationLinkExists;
+async function checkEvent(event) {
+  const html = await fetchPage(event.url);
+  const registrationOpen = isRegistrationOpen(html, event.slug);
 
   // GitHub Actions cron is UTC.
   // 23:30 UTC = 05:00 IST
@@ -82,51 +100,55 @@ async function checkRegistration() {
 
   if (isDailyStatus || forceNotify) {
     await sendTelegram(
-      `☀️ HYROX Bengaluru Daily Status
+      `☀️ ${event.name} Daily Status
 
 ${registrationOpen ? "🟢 Registration: OPEN" : "🔴 Registration: NOT OPEN"}
 
 Checked at:
 ${now.toISOString()}
 
-${URL}`,
+${event.url}`,
     );
 
-    console.log("Daily status sent.");
+    console.log(`${event.name}: daily status sent.`);
     return;
   }
 
   if (registrationOpen) {
     await sendTelegram(
-      `🚨 HYROX Bengaluru Registration appears to be LIVE!
+      `🚨 ${event.name} Registration appears to be LIVE!
 
 Check immediately:
-${URL}`,
+${event.url}`,
     );
 
-    console.log("Registration notification sent.");
+    console.log(`${event.name}: registration notification sent.`);
   } else {
     await sendTelegram(
-      `🔴 HYROX Bengaluru: registration still NOT open
+      `🔴 ${event.name}: registration still NOT open
 
 Checked at:
 ${now.toISOString()}
 
-${URL}`,
+${event.url}`,
     );
 
-    console.log("Registration not open — status sent.");
+    console.log(`${event.name}: not open — status sent.`);
   }
 }
 
-checkRegistration().catch(async (err) => {
-  console.error(err);
+async function main() {
+  // Check each event independently so one failing page doesn't block the other.
+  for (const event of EVENTS) {
+    try {
+      await checkEvent(event);
+    } catch (err) {
+      console.error(`${event.name} check failed:`, err);
+      try {
+        await sendTelegram(`❌ ${event.name} Monitor Error\n\n${err.message}`);
+      } catch (_) {}
+    }
+  }
+}
 
-  try {
-    await sendTelegram(
-      `❌ HYROX Monitor Error
-
-${err.message}`,
-    );
-  } catch (_) {}
-});
+main();
