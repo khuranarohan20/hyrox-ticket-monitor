@@ -110,6 +110,21 @@ async function main() {
   // Set on manual (workflow_dispatch) runs so a manual run always reports.
   const forceNotify = process.env.FORCE_NOTIFY === "true";
 
+  // Runs are stateless (checks fire every ~15 min), so a "not open" message on
+  // every run is spammy. Throttle the closed-status to a ~6h heartbeat off the
+  // clock: fire on the :30 run of hours 5/11/17/23 UTC (23:30 is the daily one).
+  // ponytail: clock-based throttle; wire up state.json only if per-transition
+  // dedup is ever needed. Depends on a run landing at :30 — same assumption the
+  // daily status already makes (see CLAUDE.md).
+  const isHeartbeat = now.getUTCMinutes() === 30 && now.getUTCHours() % 6 === 5;
+
+  // Open registration always alerts immediately; otherwise only speak up on a
+  // daily-status/heartbeat/forced run so closed checks stay quiet.
+  if (!anyOpen && !isDailyStatus && !forceNotify && !isHeartbeat) {
+    console.log("Registration closed and not a heartbeat window — staying quiet.");
+    return;
+  }
+
   const lines = results.map((r) => {
     if (r.error) return `⚠️ ${r.event.name}: check failed (${r.error})`;
     return r.open
